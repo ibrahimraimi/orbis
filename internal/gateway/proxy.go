@@ -24,7 +24,6 @@ func NewProxy(resolver *discovery.Resolver, logger *zap.Logger) *Proxy {
 	}
 }
 
-// ServeHTTP implements the http.Handler interface.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Simple routing logic: /api/{service}/*
 	path := r.URL.Path
@@ -42,7 +41,6 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	serviceName := parts[0]
 	
-	// Resolve upstream instance
 	instance, err := p.resolver.Resolve(serviceName)
 	if err != nil {
 		p.logger.Error("failed to resolve service", zap.String("service", serviceName), zap.Error(err))
@@ -52,7 +50,6 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	targetURL, _ := url.Parse(fmt.Sprintf("http://%s:%d", instance.Address, instance.Port))
 	
-	// Create and serve reverse proxy
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 	
 	// Strip /api/{service} from path if needed, or keep it.

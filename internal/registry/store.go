@@ -38,7 +38,6 @@ func NewBoltStore(path string) (*BoltStore, error) {
 	return &BoltStore{db: db}, nil
 }
 
-// Save persists a service instance.
 func (s *BoltStore) Save(service *models.Service) error {
 	data, err := json.Marshal(service)
 	if err != nil {
@@ -51,7 +50,6 @@ func (s *BoltStore) Save(service *models.Service) error {
 	})
 }
 
-// Delete removes a service instance by ID.
 func (s *BoltStore) Delete(id string) error {
 	return s.db.Update(func(tx *bbolt.Tx) error {
 		b := tx.Bucket(bucketName)
@@ -59,7 +57,6 @@ func (s *BoltStore) Delete(id string) error {
 	})
 }
 
-// LoadAll retrieves all persisted services.
 func (s *BoltStore) LoadAll() ([]*models.Service, error) {
 	var services []*models.Service
 

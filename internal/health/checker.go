@@ -20,7 +20,6 @@ type Checker struct {
 	timeout  time.Duration
 }
 
-// NewChecker creates a new health checker.
 func NewChecker(reg *registry.Registry, logger *zap.Logger, interval, timeout time.Duration) *Checker {
 	return &Checker{
 		registry: reg,
@@ -30,7 +29,6 @@ func NewChecker(reg *registry.Registry, logger *zap.Logger, interval, timeout ti
 	}
 }
 
-// Start begins the background health checking loop.
 func (c *Checker) Start(ctx context.Context) {
 	ticker := time.NewTicker(c.interval)
 	defer ticker.Stop()

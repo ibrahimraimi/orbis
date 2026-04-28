@@ -14,7 +14,6 @@ type Registry struct {
 	store    Store
 }
 
-// NewRegistry creates a new Registry with the provided store.
 func NewRegistry(store Store) (*Registry, error) {
 	services := make(map[string]*models.Service)
 
@@ -34,7 +33,6 @@ func NewRegistry(store Store) (*Registry, error) {
 	}, nil
 }
 
-// Register adds a new service instance or updates an existing one.
 func (r *Registry) Register(s *models.Service) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -57,7 +55,6 @@ func (r *Registry) Register(s *models.Service) error {
 	return nil
 }
 
-// Deregister removes a service instance by ID.
 func (r *Registry) Deregister(id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -73,7 +70,6 @@ func (r *Registry) Deregister(id string) error {
 	return nil
 }
 
-// GetService retrieves a service instance by ID.
 func (r *Registry) GetService(id string) (*models.Service, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -82,7 +78,6 @@ func (r *Registry) GetService(id string) (*models.Service, bool) {
 	return s, ok
 }
 
-// ListServices returns all registered services.
 func (r *Registry) ListServices() []*models.Service {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -94,7 +89,6 @@ func (r *Registry) ListServices() []*models.Service {
 	return list
 }
 
-// GetHealthyServicesByName returns all healthy instances of a service by name.
 func (r *Registry) GetHealthyServicesByName(name string) []*models.Service {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -108,7 +102,6 @@ func (r *Registry) GetHealthyServicesByName(name string) []*models.Service {
 	return healthy
 }
 
-// UpdateHealth updates the health status of a service instance.
 func (r *Registry) UpdateHealth(id string, status models.HealthStatus) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -130,7 +123,6 @@ func (r *Registry) UpdateHealth(id string, status models.HealthStatus) error {
 	return nil
 }
 
-// Heartbeat updates the UpdatedAt timestamp for a service instance.
 func (r *Registry) Heartbeat(id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -141,9 +133,7 @@ func (r *Registry) Heartbeat(id string) error {
 	}
 
 	s.UpdatedAt = time.Now()
-	// If it was unhealthy/critical, a heartbeat could potentially mark it healthy again
-	// depending on policy. For now, let's just update the timestamp.
-	
+
 	if r.store != nil {
 		if err := r.store.Save(s); err != nil {
 			return fmt.Errorf("failed to persist heartbeat: %w", err)

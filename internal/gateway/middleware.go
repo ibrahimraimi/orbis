@@ -12,7 +12,6 @@ import (
 	"golang.org/x/time/rate"
 )
 
-// RequestID injects a unique ID into each request.
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get("X-Request-ID")
@@ -24,7 +23,6 @@ func RequestID(next http.Handler) http.Handler {
 	})
 }
 
-// Logger logs each request using zap.
 func Logger(log *zap.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -40,7 +38,6 @@ func Logger(log *zap.Logger) func(http.Handler) http.Handler {
 	}
 }
 
-// RateLimiter limits requests per IP.
 func RateLimiter(rps float64, burst int) func(http.Handler) http.Handler {
 	limiters := make(map[string]*rate.Limiter)
 	var mu sync.Mutex
@@ -65,7 +62,6 @@ func RateLimiter(rps float64, burst int) func(http.Handler) http.Handler {
 	}
 }
 
-// CircuitBreaker wraps the handler in a circuit breaker.
 func CircuitBreaker(next http.Handler) http.Handler {
 	cb := gobreaker.NewCircuitBreaker(gobreaker.Settings{
 		Name:        "gateway",
@@ -85,7 +81,6 @@ func CircuitBreaker(next http.Handler) http.Handler {
 	})
 }
 
-// Timeout enforces a timeout on the request.
 func Timeout(timeout time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

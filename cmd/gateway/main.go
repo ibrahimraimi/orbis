@@ -16,34 +16,28 @@ import (
 )
 
 func main() {
-	// Initialize logger
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
-	// Load configuration
 	viper.SetDefault("port", 8080)
 	viper.SetDefault("consul_addr", "http://localhost:8500")
 	viper.SetDefault("rate_limit_rps", 10.0)
 	viper.SetDefault("rate_limit_burst", 20)
 	viper.AutomaticEnv()
 
-	port := viper.GetInt("port")
 	consulAddr := viper.GetString("consul_addr")
 	rps := viper.GetFloat64("rate_limit_rps")
 	burst := viper.GetInt("rate_limit_burst")
 
-	// Initialize discovery resolver
 	resolver := discovery.NewResolver(consulAddr)
 
-	// Initialize proxy
 	proxy := gateway.NewProxy(resolver, logger)
 
-	// Build middleware stack
 	handler := gateway.RequestID(
 		gateway.Logger(logger)(
 			gateway.RateLimiter(rps, burst)(
 				gateway.CircuitBreaker(
-					gateway.Timeout(5*time.Second)(
+					gateway.Timeout(5 * time.Second)(
 						proxy,
 					),
 				),
@@ -51,7 +45,6 @@ func main() {
 		),
 	)
 
-	// Start HTTP server
 	server := &http.Server{
 		Addr:    ":" + os.Getenv("PORT"),
 		Handler: handler,
@@ -67,13 +60,12 @@ func main() {
 		}
 	}()
 
-	// Graceful shutdown
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop
 
 	logger.Info("Shutting down API Gateway...")
-	
+
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer shutdownCancel()
 

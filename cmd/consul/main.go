@@ -20,19 +20,16 @@ func main() {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
-	// Load configuration
 	viper.SetDefault("port", 8500)
 	viper.SetDefault("db_path", "consul.db")
 	viper.SetDefault("health_interval", "10s")
 	viper.SetDefault("health_timeout", "2s")
 	viper.AutomaticEnv()
 
-	port := viper.GetInt("port")
 	dbPath := viper.GetString("db_path")
 	healthInterval := viper.GetDuration("health_interval")
 	healthTimeout := viper.GetDuration("health_timeout")
 
-	// Initialize store and registry
 	store, err := registry.NewBoltStore(dbPath)
 	if err != nil {
 		logger.Fatal("failed to initialize store", zap.Error(err))
@@ -52,7 +49,6 @@ func main() {
 	handler := api.NewHandler(reg)
 	router := api.NewRouter(handler)
 
-	// Start HTTP server
 	server := &http.Server{
 		Addr:    ":" + os.Getenv("PORT"),
 		Handler: router,
@@ -68,7 +64,6 @@ func main() {
 		}
 	}()
 
-	// Graceful shutdown
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop

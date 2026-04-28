@@ -9,7 +9,6 @@ import (
 	"time"
 )
 
-// Resolver discovers healthy service instances from Consul.
 type Resolver struct {
 	consulAddr string
 	client     *http.Client
@@ -17,7 +16,6 @@ type Resolver struct {
 	indices    map[string]int
 }
 
-// NewResolver creates a new Resolver.
 func NewResolver(consulAddr string) *Resolver {
 	return &Resolver{
 		consulAddr: consulAddr,
