@@ -1,0 +1,5 @@
+port: 8500
+db_path: "consul.db"
+health_interval: "10s"
+health_timeout: "2s"
+log_level: "info"
