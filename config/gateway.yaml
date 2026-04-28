@@ -1,0 +1,5 @@
+port: 8080
+consul_addr: "http://localhost:8500"
+rate_limit_rps: 10.0
+rate_limit_burst: 20
+log_level: "info"
