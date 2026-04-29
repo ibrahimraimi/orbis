@@ -57,6 +57,14 @@ func (c *Checker) checkService(s *models.Service) {
 	// Simple logic: if no health check meta is provided, assume HTTP on /health
 	// In a real system, this would be more configurable.
 	
+	if time.Since(s.UpdatedAt) > 30*time.Second {
+		c.logger.Warn("Service missed heartbeats beyond TTL", zap.String("id", s.ID))
+		if err := c.registry.UpdateHealth(s.ID, models.StatusUnhealthy); err != nil {
+			c.logger.Error("Failed to update health status", zap.String("id", s.ID), zap.Error(err))
+		}
+		return
+	}
+
 	status := models.StatusHealthy
 	err := c.ping(s)
 	if err != nil {

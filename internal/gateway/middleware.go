@@ -38,28 +38,68 @@ func Logger(log *zap.Logger) func(http.Handler) http.Handler {
 	}
 }
 
+func getRealIP(r *http.Request) string {
+	if ip := r.Header.Get("X-Forwarded-For"); ip != "" {
+		return ip
+	}
+	if ip := r.Header.Get("X-Real-IP"); ip != "" {
+		return ip
+	}
+	return r.RemoteAddr
+}
+
+type rateLimiter struct {
+	limiter  *rate.Limiter
+	lastSeen time.Time
+}
+
 func RateLimiter(rps float64, burst int) func(http.Handler) http.Handler {
-	limiters := make(map[string]*rate.Limiter)
+	limiters := make(map[string]*rateLimiter)
 	var mu sync.Mutex
+
+	go func() {
+		for {
+			time.Sleep(time.Minute)
+			mu.Lock()
+			for ip, l := range limiters {
+				if time.Since(l.lastSeen) > 5*time.Minute {
+					delete(limiters, ip)
+				}
+			}
+			mu.Unlock()
+		}
+	}()
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ip := r.RemoteAddr // Simplified, should use RealIP
+			ip := getRealIP(r)
+			
 			mu.Lock()
-			limiter, ok := limiters[ip]
+			l, ok := limiters[ip]
 			if !ok {
-				limiter = rate.NewLimiter(rate.Limit(rps), burst)
-				limiters[ip] = limiter
+				l = &rateLimiter{limiter: rate.NewLimiter(rate.Limit(rps), burst)}
+				limiters[ip] = l
 			}
+			l.lastSeen = time.Now()
 			mu.Unlock()
 
-			if !limiter.Allow() {
+			if !l.limiter.Allow() {
 				http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 				return
 			}
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+type responseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.statusCode = code
+	rw.ResponseWriter.WriteHeader(code)
 }
 
 func CircuitBreaker(next http.Handler) http.Handler {
@@ -71,11 +111,17 @@ func CircuitBreaker(next http.Handler) http.Handler {
 	})
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+		
 		_, err := cb.Execute(func() (interface{}, error) {
-			next.ServeHTTP(w, r)
-			return nil, nil // Note: this doesn't capture HTTP error codes easily
+			next.ServeHTTP(rw, r)
+			if rw.statusCode >= 500 {
+				return nil, fmt.Errorf("upstream server error: %d", rw.statusCode)
+			}
+			return nil, nil
 		})
-		if err != nil {
+		
+		if err != nil && rw.statusCode < 500 {
 			http.Error(w, "service unavailable (circuit open)", http.StatusServiceUnavailable)
 		}
 	})

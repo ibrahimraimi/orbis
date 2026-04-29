@@ -1,0 +1,40 @@
+# Logs
+logs
+*.log
+
+# Binary files
+*.exe
+*.out
+*.bin
+/bin
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+
+# Dependencies
+/vendor/
+
+# IDE files
+.vscode/
+.idea/
+
+# Temporary files
+*.tmp
+tmp/
+temp-*
+
+# Other ignore files
+.env.production
+.env.development
+.env
+*.env
+
+# Agent-related files
+.agents/
+.vscode/
+.idea/
+
+# Notes
+MVP_ROADMAP.md
+PROJECT.md

@@ -9,31 +9,27 @@ import (
 	"time"
 )
 
-type Resolver struct {
-	consulAddr string
-	client     *http.Client
-	mu         sync.Mutex
-	indices    map[string]int
+type LoadBalancer interface {
+	Next(instances []*models.Service) (*models.Service, error)
 }
 
-func NewResolver(consulAddr string) *Resolver {
-	return &Resolver{
-		consulAddr: consulAddr,
-		client:     &http.Client{Timeout: 5 * time.Second},
-		indices:    make(map[string]int),
+type RoundRobinBalancer struct {
+	mu      sync.Mutex
+	indices map[string]int
+}
+
+func NewRoundRobinBalancer() *RoundRobinBalancer {
+	return &RoundRobinBalancer{
+		indices: make(map[string]int),
 	}
 }
 
-// Resolve returns a healthy instance of the requested service name using Round-Robin.
-func (r *Resolver) Resolve(serviceName string) (*models.Service, error) {
-	instances, err := r.fetchHealthyInstances(serviceName)
-	if err != nil {
-		return nil, err
-	}
-
+func (r *RoundRobinBalancer) Next(instances []*models.Service) (*models.Service, error) {
 	if len(instances) == 0 {
-		return nil, fmt.Errorf("no healthy instances found for service: %s", serviceName)
+		return nil, fmt.Errorf("no healthy instances available")
 	}
+
+	serviceName := instances[0].Name
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -43,6 +39,56 @@ func (r *Resolver) Resolve(serviceName string) (*models.Service, error) {
 	r.indices[serviceName] = (idx + 1) % len(instances)
 
 	return instance, nil
+}
+
+type Resolver struct {
+	consulAddr string
+	client     *http.Client
+	balancer   LoadBalancer
+}
+
+func NewResolver(consulAddr string) *Resolver {
+	return &Resolver{
+		consulAddr: consulAddr,
+		client:     &http.Client{Timeout: 5 * time.Second},
+		balancer:   NewRoundRobinBalancer(),
+	}
+}
+
+func (r *Resolver) SetBalancer(lb LoadBalancer) {
+	r.balancer = lb
+}
+
+// Resolve returns a healthy instance of the requested service name using the configured LoadBalancer.
+func (r *Resolver) Resolve(serviceName, version string) (*models.Service, error) {
+	instances, err := r.fetchHealthyInstances(serviceName)
+	if err != nil {
+		return nil, err
+	}
+
+	if version != "" {
+		instances = filterByVersion(instances, version)
+	}
+
+	if len(instances) == 0 {
+		return nil, fmt.Errorf("no healthy instances found for service: %s (version: %s)", serviceName, version)
+	}
+
+	return r.balancer.Next(instances)
+}
+
+func filterByVersion(instances []*models.Service, version string) []*models.Service {
+	var filtered []*models.Service
+	tag := "version:" + version
+	for _, inst := range instances {
+		for _, t := range inst.Tags {
+			if t == tag {
+				filtered = append(filtered, inst)
+				break
+			}
+		}
+	}
+	return filtered
 }
 
 func (r *Resolver) fetchHealthyInstances(name string) ([]*models.Service, error) {
