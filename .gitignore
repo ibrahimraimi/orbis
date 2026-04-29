@@ -36,5 +36,4 @@ temp-*
 .idea/
 
 # Notes
-MVP_ROADMAP.md
-PROJECT.md
+/documentation
