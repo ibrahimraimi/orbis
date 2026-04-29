@@ -82,7 +82,7 @@ curl http://localhost:8080/api/user-service/profile
 
 ## Configuration
 
-Configurations are managed via YAML files in the `config/` directory and can be overridden by environment variables:
+Configurations are managed via YAML files (`config/gateway.yaml`, `config/consul.yaml`) and can be overridden by environment variables:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -90,4 +90,9 @@ Configurations are managed via YAML files in the `config/` directory and can be 
 | `CONSUL_ADDR` | http://localhost:8500 | Gateway's link to Consul |
 | `DB_PATH` | consul.db | Path to BoltDB file |
 | `RATE_LIMIT_RPS` | 10.0 | Requests per second per IP |
+| `RATE_LIMIT_BURST`| 20 | Maximum burst limit for rate limiter |
 | `HEALTH_INTERVAL`| 10s | Frequency of health checks |
+| `HEALTH_TIMEOUT` | 2s | Timeout for each health check |
+| `JWT_SECRET` | supersecretkey | Secret used for HMAC JWT validation |
+
+> **Note on Hot Reloading:** Orbis supports dynamic configuration using Viper. Editing `config/gateway.yaml` while the API Gateway is running will automatically hot-reload gateway routing rules without dropping connections.

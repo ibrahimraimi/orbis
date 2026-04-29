@@ -4,12 +4,17 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/sony/gobreaker"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 	"go.uber.org/zap"
 	"golang.org/x/time/rate"
+	"orbis/internal/observability"
 )
 
 func RequestID(next http.Handler) http.Handler {
@@ -34,6 +39,62 @@ func Logger(log *zap.Logger) func(http.Handler) http.Handler {
 				zap.Duration("duration", time.Since(start)),
 				zap.String("remote_addr", r.RemoteAddr),
 			)
+		})
+	}
+}
+
+func JWTAuth(secret string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			authHeader := r.Header.Get("Authorization")
+			if authHeader == "" {
+				http.Error(w, "authorization header missing", http.StatusUnauthorized)
+				return
+			}
+
+			parts := strings.Split(authHeader, " ")
+			if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
+				http.Error(w, "invalid authorization header format", http.StatusUnauthorized)
+				return
+			}
+
+			tokenStr := parts[1]
+			token, err := jwt.Parse(tokenStr, func(token *jwt.Token) (interface{}, error) {
+				if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+					return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+				}
+				return []byte(secret), nil
+			})
+
+			if err != nil || !token.Valid {
+				http.Error(w, "invalid token", http.StatusUnauthorized)
+				return
+			}
+
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+func MetricsAndTracing(serviceName string) func(http.Handler) http.Handler {
+	tracer := otel.Tracer(serviceName)
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := otel.GetTextMapPropagator().Extract(r.Context(), propagation.HeaderCarrier(r.Header))
+			
+			spanCtx, span := tracer.Start(ctx, r.URL.Path)
+			defer span.End()
+
+			start := time.Now()
+			
+			rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+			
+			next.ServeHTTP(rw, r.WithContext(spanCtx))
+			
+			duration := time.Since(start).Seconds()
+			
+			observability.GatewayRequestsTotal.WithLabelValues(r.Method, r.URL.Path, fmt.Sprintf("%d", rw.statusCode)).Inc()
+			observability.GatewayRequestLatency.WithLabelValues(r.Method, r.URL.Path).Observe(duration)
 		})
 	}
 }
