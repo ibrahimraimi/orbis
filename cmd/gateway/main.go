@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -10,7 +11,11 @@ import (
 
 	"orbis/internal/discovery"
 	"orbis/internal/gateway"
+	"orbis/internal/observability"
 
+	"github.com/fsnotify/fsnotify"
+	"github.com/go-chi/chi/v5/middleware"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )
@@ -19,26 +24,74 @@ func main() {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
+	// OpenTelemetry init
+	tp, err := observability.InitTracer(context.Background(), "orbis-gateway", logger)
+	if err != nil {
+		logger.Fatal("failed to initialize tracer", zap.Error(err))
+	}
+	defer func() {
+		if err := tp.Shutdown(context.Background()); err != nil {
+			logger.Error("failed to shutdown tracer provider", zap.Error(err))
+		}
+	}()
+
 	viper.SetDefault("port", 8080)
 	viper.SetDefault("consul_addr", "http://localhost:8500")
 	viper.SetDefault("rate_limit_rps", 10.0)
 	viper.SetDefault("rate_limit_burst", 20)
+	viper.SetDefault("jwt_secret", "supersecretkey")
 	viper.AutomaticEnv()
+
+	viper.SetConfigName("gateway")
+	viper.SetConfigType("yaml")
+	viper.AddConfigPath("./config")
+	if err := viper.ReadInConfig(); err != nil {
+		logger.Warn("could not read config file, relying on defaults/env", zap.Error(err))
+	}
 
 	consulAddr := viper.GetString("consul_addr")
 	rps := viper.GetFloat64("rate_limit_rps")
 	burst := viper.GetInt("rate_limit_burst")
+	jwtSecret := viper.GetString("jwt_secret")
 
 	resolver := discovery.NewResolver(consulAddr)
-
 	proxy := gateway.NewProxy(resolver, logger)
+
+	// Apply initial routes if configured
+	if routes := viper.GetStringMapString("routes"); len(routes) > 0 {
+		proxy.ReloadRoutes(routes)
+	}
+
+	viper.OnConfigChange(func(e fsnotify.Event) {
+		logger.Info("Config file changed", zap.String("file", e.Name))
+		if routes := viper.GetStringMapString("routes"); len(routes) > 0 {
+			proxy.ReloadRoutes(routes)
+		}
+	})
+	viper.WatchConfig()
+
+	// Metrics endpoint
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", promhttp.Handler())
+		logger.Info("Starting Gateway metrics server", zap.String("addr", ":2112"))
+		if err := http.ListenAndServe(":2112", mux); err != nil {
+			logger.Error("metrics server failed", zap.Error(err))
+		}
+	}()
 
 	handler := gateway.RequestID(
 		gateway.Logger(logger)(
-			gateway.RateLimiter(rps, burst)(
-				gateway.CircuitBreaker(
-					gateway.Timeout(5 * time.Second)(
-						proxy,
+			gateway.MetricsAndTracing("orbis-gateway")(
+				middleware.Compress(5)(
+					gateway.RateLimiter(rps, burst)(
+						gateway.JWTAuth(jwtSecret)(
+							gateway.CircuitBreaker(
+								gateway.Timeout(5 * time.Second)(
+									proxy,
+								),
+							),
+						),
 					),
 				),
 			),
@@ -50,7 +103,7 @@ func main() {
 		Handler: handler,
 	}
 	if os.Getenv("PORT") == "" {
-		server.Addr = ":8080"
+		server.Addr = fmt.Sprintf(":%d", viper.GetInt("port"))
 	}
 
 	go func() {

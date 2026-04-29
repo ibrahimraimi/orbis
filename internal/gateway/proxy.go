@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"orbis/internal/discovery"
 	"strings"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -45,6 +46,7 @@ type Proxy struct {
 	resolver  *discovery.Resolver
 	logger    *zap.Logger
 	transport http.RoundTripper
+	routes    sync.Map // concurrent map for hot reloading specific routes
 }
 
 func NewProxy(resolver *discovery.Resolver, logger *zap.Logger) *Proxy {
@@ -59,21 +61,41 @@ func NewProxy(resolver *discovery.Resolver, logger *zap.Logger) *Proxy {
 	}
 }
 
+// ReloadRoutes hot-swaps the route table
+func (p *Proxy) ReloadRoutes(newRoutes map[string]string) {
+	// Clear old routes (simplified approach)
+	p.routes.Range(func(key, value interface{}) bool {
+		p.routes.Delete(key)
+		return true
+	})
+	
+	for path, targetSvc := range newRoutes {
+		p.routes.Store(path, targetSvc)
+	}
+	p.logger.Info("reloaded gateway routes", zap.Int("count", len(newRoutes)))
+}
+
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	path := r.URL.Path
-	if !strings.HasPrefix(path, "/api/") {
+	
+	// Dynamic Routing Check
+	var serviceName string
+	
+	if target, ok := p.routes.Load(path); ok {
+		serviceName = target.(string)
+	} else if strings.HasPrefix(path, "/api/") {
+		trimmed := strings.TrimPrefix(path, "/api/")
+		parts := strings.Split(trimmed, "/")
+		if len(parts) == 0 || parts[0] == "" {
+			http.Error(w, "missing service name", http.StatusBadRequest)
+			return
+		}
+		serviceName = parts[0]
+		r.URL.Path = "/" + strings.Join(parts[1:], "/")
+	} else {
 		http.Error(w, "not found", http.StatusNotFound)
 		return
 	}
-
-	trimmed := strings.TrimPrefix(path, "/api/")
-	parts := strings.Split(trimmed, "/")
-	if len(parts) == 0 || parts[0] == "" {
-		http.Error(w, "missing service name", http.StatusBadRequest)
-		return
-	}
-
-	serviceName := parts[0]
 	apiVersion := r.Header.Get("X-API-Version")
 	
 	instance, err := p.resolver.Resolve(serviceName, apiVersion)
@@ -87,8 +109,6 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
 	proxy.Transport = p.transport
-	
-	r.URL.Path = "/" + strings.Join(parts[1:], "/")
 	
 	p.logger.Info("proxying request", 
 		zap.String("service", serviceName), 

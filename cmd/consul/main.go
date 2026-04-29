@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -10,8 +11,10 @@ import (
 
 	"orbis/internal/api"
 	"orbis/internal/health"
+	"orbis/internal/observability"
 	"orbis/internal/registry"
 
+	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/viper"
 	"go.uber.org/zap"
 )
@@ -20,11 +23,34 @@ func main() {
 	logger, _ := zap.NewProduction()
 	defer logger.Sync()
 
+	// OpenTelemetry init
+	tp, err := observability.InitTracer(context.Background(), "orbis-consul", logger)
+	if err != nil {
+		logger.Fatal("failed to initialize tracer", zap.Error(err))
+	}
+	defer func() {
+		if err := tp.Shutdown(context.Background()); err != nil {
+			logger.Error("failed to shutdown tracer provider", zap.Error(err))
+		}
+	}()
+
 	viper.SetDefault("port", 8500)
 	viper.SetDefault("db_path", "consul.db")
 	viper.SetDefault("health_interval", "10s")
 	viper.SetDefault("health_timeout", "2s")
 	viper.AutomaticEnv()
+
+	viper.SetConfigName("consul")
+	viper.SetConfigType("yaml")
+	viper.AddConfigPath("./config")
+	if err := viper.ReadInConfig(); err != nil {
+		logger.Warn("could not read config file, relying on defaults/env", zap.Error(err))
+	}
+
+	viper.OnConfigChange(func(e fsnotify.Event) {
+		logger.Info("Config file changed", zap.String("file", e.Name))
+	})
+	viper.WatchConfig()
 
 	dbPath := viper.GetString("db_path")
 	healthInterval := viper.GetDuration("health_interval")
@@ -54,7 +80,7 @@ func main() {
 		Handler: router,
 	}
 	if os.Getenv("PORT") == "" {
-		server.Addr = ":8500"
+		server.Addr = fmt.Sprintf(":%d", viper.GetInt("port"))
 	}
 
 	go func() {
