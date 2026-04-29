@@ -7,25 +7,59 @@ import (
 	"net/url"
 	"orbis/internal/discovery"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 )
 
+type RetryTransport struct {
+	next       http.RoundTripper
+	maxRetries int
+	logger     *zap.Logger
+}
+
+func (t *RetryTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	var resp *http.Response
+	var err error
+	
+	backoff := 100 * time.Millisecond
+
+	for i := 0; i <= t.maxRetries; i++ {
+		if i > 0 {
+			t.logger.Warn("Retrying upstream request", zap.Int("attempt", i), zap.String("url", req.URL.String()))
+			time.Sleep(backoff)
+			backoff *= 2
+		}
+		
+		resp, err = t.next.RoundTrip(req)
+		// Only retry on network errors (transient upstream failures)
+		if err == nil {
+			return resp, nil
+		}
+	}
+	return resp, err
+}
+
 // Proxy handles forwarding requests to upstream services.
 type Proxy struct {
-	resolver *discovery.Resolver
-	logger   *zap.Logger
+	resolver  *discovery.Resolver
+	logger    *zap.Logger
+	transport http.RoundTripper
 }
 
 func NewProxy(resolver *discovery.Resolver, logger *zap.Logger) *Proxy {
 	return &Proxy{
 		resolver: resolver,
 		logger:   logger,
+		transport: &RetryTransport{
+			next:       http.DefaultTransport,
+			maxRetries: 3,
+			logger:     logger,
+		},
 	}
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	// Simple routing logic: /api/{service}/*
 	path := r.URL.Path
 	if !strings.HasPrefix(path, "/api/") {
 		http.Error(w, "not found", http.StatusNotFound)
@@ -40,10 +74,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	serviceName := parts[0]
+	apiVersion := r.Header.Get("X-API-Version")
 	
-	instance, err := p.resolver.Resolve(serviceName)
+	instance, err := p.resolver.Resolve(serviceName, apiVersion)
 	if err != nil {
-		p.logger.Error("failed to resolve service", zap.String("service", serviceName), zap.Error(err))
+		p.logger.Error("failed to resolve service", zap.String("service", serviceName), zap.String("version", apiVersion), zap.Error(err))
 		http.Error(w, "service unavailable", http.StatusServiceUnavailable)
 		return
 	}
@@ -51,13 +86,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	targetURL, _ := url.Parse(fmt.Sprintf("http://%s:%d", instance.Address, instance.Port))
 	
 	proxy := httputil.NewSingleHostReverseProxy(targetURL)
+	proxy.Transport = p.transport
 	
-	// Strip /api/{service} from path if needed, or keep it.
-	// For now, let's strip it to be clean.
 	r.URL.Path = "/" + strings.Join(parts[1:], "/")
 	
 	p.logger.Info("proxying request", 
 		zap.String("service", serviceName), 
+		zap.String("version", apiVersion),
 		zap.String("target", targetURL.String()),
 		zap.String("path", r.URL.Path))
 
