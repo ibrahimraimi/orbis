@@ -22,6 +22,7 @@ func NewRouter(h *Handler) http.Handler {
 		r.Route("/services", func(r chi.Router) {
 			r.Post("/register", h.Register)
 			r.Get("/", h.ListServices)
+			r.Get("/watch", h.WatchServices)
 			r.Get("/{name}", h.Lookup)
 			
 			r.Route("/{id}", func(r chi.Router) {

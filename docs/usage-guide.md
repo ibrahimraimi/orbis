@@ -61,6 +61,13 @@ Retrieve a list of all currently registered services and their metadata.
 curl http://localhost:8500/v1/services
 ```
 
+### Watch Services (Real-time Events)
+The registry provides a Server-Sent Events (SSE) endpoint that streams JSON payloads whenever a service state changes (registered, deregistered, or health updated).
+
+```bash
+curl -N http://localhost:8500/v1/services/watch
+```
+
 ### Lookup Healthy Instances
 Find all **healthy** instances of a specific service by name. This is used by the Gateway internally but can be queried manually.
 
@@ -87,6 +94,9 @@ curl -X DELETE http://localhost:8500/v1/services/order-service-v1-1/deregister
 ## 3. API Gateway
 
 The Gateway is available on port `:8080` by default.
+
+### Event-Driven Caching
+The Gateway uses the Registry's SSE stream (`/v1/services/watch`) to maintain a perfectly mirrored, in-memory cache of healthy services. This allows the proxy to achieve zero-latency dynamic routing without ever needing to perform HTTP polling against the registry on the request hot path.
 
 ### Routing Logic
 The gateway uses path-based routing: `http://gateway:8080/api/<service-name>/<path>`.
