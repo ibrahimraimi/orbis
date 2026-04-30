@@ -1,6 +1,9 @@
 package api
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -8,6 +11,7 @@ import (
 	"orbis/internal/registry"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 type Handler struct {
@@ -112,7 +116,76 @@ func (h *Handler) GetHealth(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"status": string(svc.Health)})
 }
 
-func (h *Handler) WatchServices(w http.ResponseWriter, r *http.Request) {
+// Consumers
+
+func (h *Handler) CreateConsumer(w http.ResponseWriter, r *http.Request) {
+	var payload struct {
+		Name       string  `json:"name"`
+		CustomRate float64 `json:"custom_rate,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		http.Error(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if payload.Name == "" {
+		http.Error(w, "missing name", http.StatusBadRequest)
+		return
+	}
+
+	rawKey := make([]byte, 32)
+	if _, err := rand.Read(rawKey); err != nil {
+		http.Error(w, "failed to generate api key", http.StatusInternalServerError)
+		return
+	}
+	apiKeyStr := hex.EncodeToString(rawKey)
+
+	hash := sha256.Sum256([]byte(apiKeyStr))
+	hashStr := hex.EncodeToString(hash[:])
+
+	consumer := &models.Consumer{
+		ID:         uuid.New().String(),
+		Name:       payload.Name,
+		APIKeyHash: hashStr,
+		CustomRate: payload.CustomRate,
+	}
+
+	if err := h.registry.CreateConsumer(consumer); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	resp := models.ConsumerResponse{
+		Consumer:  *consumer,
+		RawAPIKey: apiKeyStr,
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(resp)
+}
+
+func (h *Handler) ListConsumers(w http.ResponseWriter, r *http.Request) {
+	consumers := h.registry.ListConsumers()
+	json.NewEncoder(w).Encode(consumers)
+}
+
+func (h *Handler) DeleteConsumer(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		http.Error(w, "missing consumer id", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.registry.DeleteConsumer(id); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Unified Watch Stream
+func (h *Handler) WatchEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")

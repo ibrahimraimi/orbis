@@ -19,10 +19,11 @@ func NewRouter(h *Handler) http.Handler {
 	r.Handle("/metrics", promhttp.Handler())
 
 	r.Route("/v1", func(r chi.Router) {
+		r.Get("/watch", h.WatchEvents) // Unified SSE stream
+
 		r.Route("/services", func(r chi.Router) {
 			r.Post("/register", h.Register)
 			r.Get("/", h.ListServices)
-			r.Get("/watch", h.WatchServices)
 			r.Get("/{name}", h.Lookup)
 			
 			r.Route("/{id}", func(r chi.Router) {
@@ -33,6 +34,12 @@ func NewRouter(h *Handler) http.Handler {
 			})
 		})
 		
+		r.Route("/consumers", func(r chi.Router) {
+			r.Post("/", h.CreateConsumer)
+			r.Get("/", h.ListConsumers)
+			r.Delete("/{id}", h.DeleteConsumer)
+		})
+
 		r.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusOK)
 			w.Write([]byte("OK"))
