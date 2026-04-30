@@ -1,12 +1,17 @@
 package discovery
 
 import (
+	"bufio"
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"orbis/internal/models"
 	"sync"
 	"time"
+
+	"go.uber.org/zap"
 )
 
 type LoadBalancer interface {
@@ -45,6 +50,9 @@ type Resolver struct {
 	consulAddr string
 	client     *http.Client
 	balancer   LoadBalancer
+
+	mu    sync.RWMutex
+	cache map[string]map[string]*models.Service // name -> id -> service
 }
 
 func NewResolver(consulAddr string) *Resolver {
@@ -52,6 +60,7 @@ func NewResolver(consulAddr string) *Resolver {
 		consulAddr: consulAddr,
 		client:     &http.Client{Timeout: 5 * time.Second},
 		balancer:   NewRoundRobinBalancer(),
+		cache:      make(map[string]map[string]*models.Service),
 	}
 }
 
@@ -59,11 +68,134 @@ func (r *Resolver) SetBalancer(lb LoadBalancer) {
 	r.balancer = lb
 }
 
-// Resolve returns a healthy instance of the requested service name using the configured LoadBalancer.
-func (r *Resolver) Resolve(serviceName, version string) (*models.Service, error) {
-	instances, err := r.fetchHealthyInstances(serviceName)
+// Watch starts listening to the registry's SSE stream and updates the cache in real-time.
+func (r *Resolver) Watch(ctx context.Context, logger *zap.Logger) {
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			if err := r.fullSync(); err != nil {
+				logger.Warn("resolver full sync failed", zap.Error(err))
+				time.Sleep(2 * time.Second)
+				continue
+			}
+
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.consulAddr+"/v1/services/watch", nil)
+			if err != nil {
+				time.Sleep(2 * time.Second)
+				continue
+			}
+			req.Header.Set("Accept", "text/event-stream")
+
+			sseClient := &http.Client{} // No timeout for SSE
+			resp, err := sseClient.Do(req)
+			if err != nil {
+				logger.Warn("resolver SSE connect failed", zap.Error(err))
+				time.Sleep(2 * time.Second)
+				continue
+			}
+
+			logger.Info("Connected to registry SSE stream")
+
+			reader := bufio.NewReader(resp.Body)
+			for {
+				line, err := reader.ReadBytes('\n')
+				if err != nil {
+					logger.Warn("resolver SSE disconnected", zap.Error(err))
+					resp.Body.Close()
+					break
+				}
+
+				if len(line) == 0 || line[0] == '\n' {
+					continue
+				}
+
+				if bytes.HasPrefix(line, []byte("data: ")) {
+					data := bytes.TrimPrefix(line, []byte("data: "))
+					var event struct {
+						Type    string          `json:"type"`
+						Service *models.Service `json:"service"`
+						ID      string          `json:"id"`
+					}
+					if err := json.Unmarshal(data, &event); err != nil {
+						logger.Error("failed to decode SSE event", zap.Error(err))
+						continue
+					}
+
+					r.mu.Lock()
+					if event.Type == "upsert" && event.Service != nil {
+						if r.cache[event.Service.Name] == nil {
+							r.cache[event.Service.Name] = make(map[string]*models.Service)
+						}
+						r.cache[event.Service.Name][event.Service.ID] = event.Service
+					} else if event.Type == "delete" {
+						for name, instances := range r.cache {
+							if _, ok := instances[event.ID]; ok {
+								delete(instances, event.ID)
+								if len(instances) == 0 {
+									delete(r.cache, name)
+								}
+								break
+							}
+						}
+					}
+					r.mu.Unlock()
+				}
+			}
+			time.Sleep(2 * time.Second)
+		}
+	}()
+}
+
+func (r *Resolver) fullSync() error {
+	url := fmt.Sprintf("%s/v1/services", r.consulAddr)
+	resp, err := r.client.Get(url)
 	if err != nil {
-		return nil, err
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("bad status: %d", resp.StatusCode)
+	}
+
+	var services []*models.Service
+	if err := json.NewDecoder(resp.Body).Decode(&services); err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	r.cache = make(map[string]map[string]*models.Service)
+	for _, s := range services {
+		if r.cache[s.Name] == nil {
+			r.cache[s.Name] = make(map[string]*models.Service)
+		}
+		r.cache[s.Name][s.ID] = s
+	}
+	r.mu.Unlock()
+
+	return nil
+}
+
+// Resolve returns a healthy instance of the requested service name from the local cache.
+func (r *Resolver) Resolve(serviceName, version string) (*models.Service, error) {
+	r.mu.RLock()
+	instancesMap, ok := r.cache[serviceName]
+	r.mu.RUnlock()
+
+	if !ok || len(instancesMap) == 0 {
+		return nil, fmt.Errorf("no healthy instances found for service: %s (version: %s)", serviceName, version)
+	}
+
+	var instances []*models.Service
+	for _, inst := range instancesMap {
+		if inst.Health == models.StatusHealthy {
+			instances = append(instances, inst)
+		}
 	}
 
 	if version != "" {
@@ -89,24 +221,4 @@ func filterByVersion(instances []*models.Service, version string) []*models.Serv
 		}
 	}
 	return filtered
-}
-
-func (r *Resolver) fetchHealthyInstances(name string) ([]*models.Service, error) {
-	url := fmt.Sprintf("%s/v1/services/%s", r.consulAddr, name)
-	resp, err := r.client.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to contact consul: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("consul returned status: %d", resp.StatusCode)
-	}
-
-	var instances []*models.Service
-	if err := json.NewDecoder(resp.Body).Decode(&instances); err != nil {
-		return nil, fmt.Errorf("failed to decode consul response: %w", err)
-	}
-
-	return instances, nil
 }

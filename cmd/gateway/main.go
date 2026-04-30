@@ -55,6 +55,7 @@ func main() {
 	jwtSecret := viper.GetString("jwt_secret")
 
 	resolver := discovery.NewResolver(consulAddr)
+	resolver.Watch(context.Background(), logger)
 	proxy := gateway.NewProxy(resolver, logger)
 
 	// Apply initial routes if configured

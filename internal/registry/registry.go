@@ -12,6 +12,7 @@ type Registry struct {
 	mu       sync.RWMutex
 	services map[string]*models.Service
 	store    Store
+	Broker   *EventBroker
 }
 
 func NewRegistry(store Store) (*Registry, error) {
@@ -30,6 +31,7 @@ func NewRegistry(store Store) (*Registry, error) {
 	return &Registry{
 		services: services,
 		store:    store,
+		Broker:   NewEventBroker(),
 	}, nil
 }
 
@@ -52,6 +54,12 @@ func (r *Registry) Register(s *models.Service) error {
 		}
 	}
 
+	r.Broker.Publish(ServiceEvent{
+		Type:    EventServiceUpserted,
+		Service: s,
+		ID:      s.ID,
+	})
+
 	return nil
 }
 
@@ -66,6 +74,11 @@ func (r *Registry) Deregister(id string) error {
 			return fmt.Errorf("failed to delete service from store: %w", err)
 		}
 	}
+
+	r.Broker.Publish(ServiceEvent{
+		Type: EventServiceDeleted,
+		ID:   id,
+	})
 
 	return nil
 }
@@ -120,6 +133,12 @@ func (r *Registry) UpdateHealth(id string, status models.HealthStatus) error {
 		}
 	}
 
+	r.Broker.Publish(ServiceEvent{
+		Type:    EventServiceUpserted,
+		Service: s,
+		ID:      s.ID,
+	})
+
 	return nil
 }
 
@@ -139,6 +158,12 @@ func (r *Registry) Heartbeat(id string) error {
 			return fmt.Errorf("failed to persist heartbeat: %w", err)
 		}
 	}
+
+	r.Broker.Publish(ServiceEvent{
+		Type:    EventServiceUpserted,
+		Service: s,
+		ID:      s.ID,
+	})
 
 	return nil
 }

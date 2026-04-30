@@ -1,6 +1,6 @@
-# Orbis Service Discovery & API Gateway
+# Orbis
 
-Orbis is a production-grade service discovery and API gateway system built in Go. It provides a persistent service registry with integrated health checking and an intelligent gateway with resilience and observability features.
+Orbis is a service discovery and API gateway system. It provides a persistent service registry with integrated health checking and an intelligent gateway with resilience and observability features.
 
 ## Core Features
 
