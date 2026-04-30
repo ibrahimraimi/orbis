@@ -36,6 +36,8 @@ func main() {
 
 	viper.SetDefault("port", 8500)
 	viper.SetDefault("db_path", "consul.db")
+	viper.SetDefault("store_type", "bolt")
+	viper.SetDefault("redis_url", "localhost:6379")
 	viper.SetDefault("health_interval", "10s")
 	viper.SetDefault("health_timeout", "2s")
 	viper.AutomaticEnv()
@@ -52,13 +54,23 @@ func main() {
 	})
 	viper.WatchConfig()
 
-	dbPath := viper.GetString("db_path")
 	healthInterval := viper.GetDuration("health_interval")
 	healthTimeout := viper.GetDuration("health_timeout")
 
-	store, err := registry.NewBoltStore(dbPath)
-	if err != nil {
-		logger.Fatal("failed to initialize store", zap.Error(err))
+	var store registry.Store
+	if viper.GetString("store_type") == "redis" {
+		store, err = registry.NewRedisStore(viper.GetString("redis_url"))
+		if err != nil {
+			logger.Fatal("failed to initialize redis store", zap.Error(err))
+		}
+		logger.Info("Initialized Redis store")
+	} else {
+		dbPath := viper.GetString("db_path")
+		store, err = registry.NewBoltStore(dbPath)
+		if err != nil {
+			logger.Fatal("failed to initialize bolt store", zap.Error(err))
+		}
+		logger.Info("Initialized BoltDB store")
 	}
 	defer store.Close()
 

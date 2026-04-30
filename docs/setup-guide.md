@@ -88,7 +88,9 @@ Configurations are managed via YAML files (`config/gateway.yaml`, `config/consul
 |----------|---------|-------------|
 | `PORT` | 8500 / 8080 | Listening port |
 | `CONSUL_ADDR` | http://localhost:8500 | Gateway's link to Consul |
-| `DB_PATH` | consul.db | Path to BoltDB file |
+| `STORE_TYPE` | bolt | Storage backend (`bolt` or `redis`) |
+| `REDIS_URL` | localhost:6379 | Redis connection string (if using redis) |
+| `DB_PATH` | consul.db | Path to BoltDB file (if using bolt) |
 | `RATE_LIMIT_RPS` | 10.0 | Requests per second per IP |
 | `RATE_LIMIT_BURST`| 20 | Maximum burst limit for rate limiter |
 | `HEALTH_INTERVAL`| 10s | Frequency of health checks |
