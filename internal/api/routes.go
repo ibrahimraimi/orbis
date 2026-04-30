@@ -25,6 +25,7 @@ func NewRouter(h *Handler) http.Handler {
 			r.Get("/{name}", h.Lookup)
 			
 			r.Route("/{id}", func(r chi.Router) {
+				r.Get("/", h.GetService)
 				r.Delete("/deregister", h.Deregister)
 				r.Put("/heartbeat", h.Heartbeat)
 				r.Get("/health", h.GetHealth)
