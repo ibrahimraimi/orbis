@@ -64,6 +64,22 @@ func (h *Handler) Lookup(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(services)
 }
 
+func (h *Handler) GetService(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	if id == "" {
+		http.Error(w, "missing service id", http.StatusBadRequest)
+		return
+	}
+
+	svc, ok := h.registry.GetService(id)
+	if !ok {
+		http.Error(w, "service not found", http.StatusNotFound)
+		return
+	}
+
+	json.NewEncoder(w).Encode(svc)
+}
+
 func (h *Handler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	if id == "" {

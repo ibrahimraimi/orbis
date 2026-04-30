@@ -2,7 +2,36 @@
 
 This guide provides practical examples and workflows for interacting with the Orbis Service Discovery and API Gateway system.
 
-## 1. Consul API (Service Registry)
+## 1. Developer CLI (`orbisctl`)
+
+The `orbisctl` tool is the easiest way to manage your Orbis cluster directly from your terminal.
+
+### Building the CLI
+```bash
+go build -o bin/orbisctl ./cmd/orbisctl
+```
+
+### Listing Services
+Displays a formatted table of all currently registered services.
+```bash
+./bin/orbisctl services list
+```
+
+### Inspecting a Service
+Fetch the full JSON payload for a specific service ID.
+```bash
+./bin/orbisctl services get <service-id>
+```
+
+### Triggering a Heartbeat
+If you are manually testing TTL expiration, you can manually ping a service to reset its TTL.
+```bash
+./bin/orbisctl health trigger <service-id>
+```
+
+---
+
+## 2. Consul API (Service Registry)
 
 The Consul API is available on port `:8500` by default.
 
@@ -55,7 +84,7 @@ curl -X DELETE http://localhost:8500/v1/services/order-service-v1-1/deregister
 
 ---
 
-## 2. API Gateway
+## 3. API Gateway
 
 The Gateway is available on port `:8080` by default.
 
@@ -104,7 +133,7 @@ The gateway enforces a 5-second timeout by default. If the upstream takes longer
 
 ---
 
-## 3. Advanced Configuration
+## 4. Advanced Configuration
 
 ### Health Check Protocols
 Orbis supports two health check protocols:
@@ -125,7 +154,7 @@ curl -I -H "Authorization: Bearer <your-jwt>" http://localhost:8080/api/user-ser
 
 ---
 
-## 4. Observability
+## 5. Observability
 
 ### Prometheus Metrics
 Orbis natively exposes Prometheus metrics on both the Registry and Gateway.

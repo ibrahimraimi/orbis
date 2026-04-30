@@ -20,7 +20,8 @@ Orbis is a production-grade service discovery and API gateway system built in Go
 .
 ├── cmd/
 │   ├── consul/       # Registry service entry point
-│   └── gateway/      # API Gateway entry point
+│   ├── gateway/      # API Gateway entry point
+│   └── orbisctl/     # Developer CLI tool
 ├── internal/
 │   ├── api/          # Registry REST API handlers
 │   ├── discovery/    # Client-side discovery resolver
@@ -31,6 +32,20 @@ Orbis is a production-grade service discovery and API gateway system built in Go
 ├── config/           # Default configurations (YAML)
 ├── docker/           # Service Dockerfiles
 └── Makefile          # Build and test orchestration
+```
+
+## Developer CLI
+
+Orbis includes `orbisctl`, a native command-line interface for interacting with the registry.
+
+```bash
+go build -o bin/orbisctl ./cmd/orbisctl
+
+# View all registered services
+./bin/orbisctl services list
+
+# Inspect a specific service
+./bin/orbisctl services get <service-id>
 ```
 
 ## Quick Start
