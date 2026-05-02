@@ -1,18 +1,21 @@
 # Orbis
 
-Orbis is a service discovery and API gateway system. It provides a persistent service registry with integrated health checking and an intelligent gateway with resilience and observability features.
+Orbis is a service discovery and API gateway system. It provides a persistent service registry with integrated health checking and an intelligent gateway with resilience and observability.
 
 ## Core Features
 
-- **Service Registry**: Persistent storage of service metadata using `bbolt`.
+- **Service Registry**: Pluggable storage backends (BoltDB & Redis).
 - **Health Checking**: Automatic HTTP and TCP health monitoring of registered instances.
-- **Dynamic Routing**: Automatic discovery and routing to healthy upstream services.
-- **Load Balancing**: Round-Robin selection of healthy service instances.
+- **Event-Driven Architecture**: Zero-latency gateway synchronization via a native Server-Sent Events (SSE) Pub/Sub stream (`/v1/watch`).
+- **Dynamic Gateway**: Intelligent proxying with path rewriting, load balancing, and version-based routing (`X-API-Version`).
+- **Consumer & API Key Management**: Securely generates, hashes, and validates API keys (`X-API-Key`) for distinct B2B client access control.
 - **Resilience Stack**:
   - **Circuit Breaking**: Prevents cascading failures.
   - **Rate Limiting**: Token-bucket based IP limiting.
   - **Timeouts**: Enforced request deadlines.
-- **Observability**: Structured logging (`zap`) and unique Request ID injection.
+- **Observability**: 
+  - Structured logging (`zap`) and unique Request ID injection.
+  - **Prometheus Metrics & OpenTelemetry**: Deep request tracing and performance charting, enriched with granular `consumer_id` tags.
 
 ## Project Structure
 

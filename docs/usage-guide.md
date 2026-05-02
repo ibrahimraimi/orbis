@@ -61,11 +61,11 @@ Retrieve a list of all currently registered services and their metadata.
 curl http://localhost:8500/v1/services
 ```
 
-### Watch Services (Real-time Events)
-The registry provides a Server-Sent Events (SSE) endpoint that streams JSON payloads whenever a service state changes (registered, deregistered, or health updated).
+### Unified Watch Stream (Real-time Events)
+The registry provides a Server-Sent Events (SSE) endpoint that streams JSON payloads whenever a service or consumer state changes.
 
 ```bash
-curl -N http://localhost:8500/v1/services/watch
+curl -N http://localhost:8500/v1/watch
 ```
 
 ### Lookup Healthy Instances
@@ -89,6 +89,20 @@ Remove a service instance from the registry.
 curl -X DELETE http://localhost:8500/v1/services/order-service-v1-1/deregister
 ```
 
+### Manage Consumers (API Keys)
+Create a new consumer to generate an API key for gateway access. The raw API key is returned exactly once.
+
+```bash
+curl -X POST http://localhost:8500/v1/consumers \
+  -H "Content-Type: application/json" \
+  -d '{"name": "frontend-app"}'
+```
+
+List all consumers:
+```bash
+curl http://localhost:8500/v1/consumers
+```
+
 ---
 
 ## 3. API Gateway
@@ -96,7 +110,7 @@ curl -X DELETE http://localhost:8500/v1/services/order-service-v1-1/deregister
 The Gateway is available on port `:8080` by default.
 
 ### Event-Driven Caching
-The Gateway uses the Registry's SSE stream (`/v1/services/watch`) to maintain a perfectly mirrored, in-memory cache of healthy services. This allows the proxy to achieve zero-latency dynamic routing without ever needing to perform HTTP polling against the registry on the request hot path.
+The Gateway uses the Registry's unified SSE stream (`/v1/watch`) to maintain a perfectly mirrored, in-memory cache of healthy services and authorized consumers. This allows the proxy to achieve zero-latency dynamic routing without ever needing to perform HTTP polling against the registry on the request hot path.
 
 ### Routing Logic
 The gateway uses path-based routing: `http://gateway:8080/api/<service-name>/<path>`.
@@ -104,7 +118,7 @@ The gateway uses path-based routing: `http://gateway:8080/api/<service-name>/<pa
 **Example:**
 To call the `/v1/orders` endpoint on `order-service`:
 ```bash
-curl -H "Authorization: Bearer <your-jwt>" http://localhost:8080/api/order-service/v1/orders
+curl -H "X-API-Key: <your-api-key>" http://localhost:8080/api/order-service/v1/orders
 ```
 The gateway will:
 1. Resolve a healthy instance of `order-service` from Consul.
@@ -115,13 +129,13 @@ The gateway will:
 The Gateway supports routing traffic to specific service versions using the `X-API-Version` header.
 
 ```bash
-curl -H "Authorization: Bearer <your-jwt>" -H "X-API-Version: v2" http://localhost:8080/api/order-service/orders
+curl -H "X-API-Key: <your-api-key>" -H "X-API-Version: v2" http://localhost:8080/api/order-service/orders
 ```
 This will exclusively route the request to instances tagged with `version:v2`.
 
-### JWT Authentication
-All gateway routes are protected by a JWT authentication middleware.
-You must provide a valid `Authorization: Bearer <token>` signed with the configured `JWT_SECRET`.
+### API Key Authentication
+All gateway routes are protected by the API Key authentication middleware.
+You must provide a valid API Key using the `X-API-Key` header. The Gateway validates this against its real-time cache of registered consumers.
 
 ### Resilience Features
 
@@ -130,7 +144,7 @@ If you exceed the configured `RATE_LIMIT_RPS` (default: 10 requests/sec), you wi
 
 ```bash
 # Test rate limiting (requires 'hey' or 'ab' tool)
-hey -n 100 -c 10 -H "Authorization: Bearer <your-jwt>" http://localhost:8080/api/order-service/data
+hey -n 100 -c 10 -H "X-API-Key: <your-api-key>" http://localhost:8080/api/order-service/data
 ```
 
 #### Circuit Breaking & Retries
@@ -158,7 +172,7 @@ Orbis supports two health check protocols:
 Every request passing through the gateway is injected with an `X-Request-ID` header if not already present. This ID is logged across all services for distributed tracing.
 
 ```bash
-curl -I -H "Authorization: Bearer <your-jwt>" http://localhost:8080/api/user-service/profile
+curl -I -H "X-API-Key: <your-api-key>" http://localhost:8080/api/user-service/profile
 # Check response headers for X-Request-ID
 ```
 

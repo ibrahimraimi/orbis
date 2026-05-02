@@ -11,7 +11,7 @@ var (
 			Name: "orbis_gateway_requests_total",
 			Help: "Total number of HTTP requests routed through the gateway",
 		},
-		[]string{"method", "path", "status"},
+		[]string{"method", "path", "status", "consumer_id"},
 	)
 
 	GatewayRequestLatency = promauto.NewHistogramVec(
@@ -20,7 +20,7 @@ var (
 			Help:    "Latency of HTTP requests in seconds",
 			Buckets: prometheus.DefBuckets,
 		},
-		[]string{"method", "path"},
+		[]string{"method", "path", "consumer_id"},
 	)
 
 	RegistryActiveServices = promauto.NewGaugeVec(

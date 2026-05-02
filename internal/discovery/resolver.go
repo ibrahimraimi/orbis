@@ -51,8 +51,9 @@ type Resolver struct {
 	client     *http.Client
 	balancer   LoadBalancer
 
-	mu    sync.RWMutex
-	cache map[string]map[string]*models.Service // name -> id -> service
+	mu        sync.RWMutex
+	cache     map[string]map[string]*models.Service // name -> id -> service
+	consumers map[string]*models.Consumer           // hash -> consumer
 }
 
 func NewResolver(consulAddr string) *Resolver {
@@ -61,6 +62,7 @@ func NewResolver(consulAddr string) *Resolver {
 		client:     &http.Client{Timeout: 5 * time.Second},
 		balancer:   NewRoundRobinBalancer(),
 		cache:      make(map[string]map[string]*models.Service),
+		consumers:  make(map[string]*models.Consumer),
 	}
 }
 
@@ -83,8 +85,14 @@ func (r *Resolver) Watch(ctx context.Context, logger *zap.Logger) {
 				time.Sleep(2 * time.Second)
 				continue
 			}
+			
+			if err := r.fullSyncConsumers(); err != nil {
+				logger.Warn("resolver consumer sync failed", zap.Error(err))
+				time.Sleep(2 * time.Second)
+				continue
+			}
 
-			req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.consulAddr+"/v1/services/watch", nil)
+			req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.consulAddr+"/v1/watch", nil)
 			if err != nil {
 				time.Sleep(2 * time.Second)
 				continue
@@ -117,9 +125,10 @@ func (r *Resolver) Watch(ctx context.Context, logger *zap.Logger) {
 				if bytes.HasPrefix(line, []byte("data: ")) {
 					data := bytes.TrimPrefix(line, []byte("data: "))
 					var event struct {
-						Type    string          `json:"type"`
-						Service *models.Service `json:"service"`
-						ID      string          `json:"id"`
+						Type     string           `json:"type"`
+						Service  *models.Service  `json:"service"`
+						Consumer *models.Consumer `json:"consumer"`
+						ID       string           `json:"id"`
 					}
 					if err := json.Unmarshal(data, &event); err != nil {
 						logger.Error("failed to decode SSE event", zap.Error(err))
@@ -127,18 +136,32 @@ func (r *Resolver) Watch(ctx context.Context, logger *zap.Logger) {
 					}
 
 					r.mu.Lock()
-					if event.Type == "upsert" && event.Service != nil {
-						if r.cache[event.Service.Name] == nil {
-							r.cache[event.Service.Name] = make(map[string]*models.Service)
+					switch event.Type {
+					case "service_upsert":
+						if event.Service != nil {
+							if r.cache[event.Service.Name] == nil {
+								r.cache[event.Service.Name] = make(map[string]*models.Service)
+							}
+							r.cache[event.Service.Name][event.Service.ID] = event.Service
 						}
-						r.cache[event.Service.Name][event.Service.ID] = event.Service
-					} else if event.Type == "delete" {
+					case "service_delete":
 						for name, instances := range r.cache {
 							if _, ok := instances[event.ID]; ok {
 								delete(instances, event.ID)
 								if len(instances) == 0 {
 									delete(r.cache, name)
 								}
+								break
+							}
+						}
+					case "consumer_upsert":
+						if event.Consumer != nil {
+							r.consumers[event.Consumer.APIKeyHash] = event.Consumer
+						}
+					case "consumer_delete":
+						for hash, c := range r.consumers {
+							if c.ID == event.ID {
+								delete(r.consumers, hash)
 								break
 							}
 						}
@@ -179,6 +202,41 @@ func (r *Resolver) fullSync() error {
 	r.mu.Unlock()
 
 	return nil
+}
+
+func (r *Resolver) fullSyncConsumers() error {
+	url := fmt.Sprintf("%s/v1/consumers", r.consulAddr)
+	resp, err := r.client.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("bad status: %d", resp.StatusCode)
+	}
+
+	var consumers []*models.Consumer
+	if err := json.NewDecoder(resp.Body).Decode(&consumers); err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	r.consumers = make(map[string]*models.Consumer)
+	for _, c := range consumers {
+		r.consumers[c.APIKeyHash] = c
+	}
+	r.mu.Unlock()
+
+	return nil
+}
+
+func (r *Resolver) GetConsumerByKeyHash(hash string) (*models.Consumer, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	c, ok := r.consumers[hash]
+	return c, ok
 }
 
 // Resolve returns a healthy instance of the requested service name from the local cache.

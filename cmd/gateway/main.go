@@ -52,7 +52,6 @@ func main() {
 	consulAddr := viper.GetString("consul_addr")
 	rps := viper.GetFloat64("rate_limit_rps")
 	burst := viper.GetInt("rate_limit_burst")
-	jwtSecret := viper.GetString("jwt_secret")
 
 	resolver := discovery.NewResolver(consulAddr)
 	resolver.Watch(context.Background(), logger)
@@ -86,7 +85,7 @@ func main() {
 			gateway.MetricsAndTracing("orbis-gateway")(
 				middleware.Compress(5)(
 					gateway.RateLimiter(rps, burst)(
-						gateway.JWTAuth(jwtSecret)(
+						gateway.APIKeyAuth(resolver)(
 							gateway.CircuitBreaker(
 								gateway.Timeout(5 * time.Second)(
 									proxy,

@@ -8,14 +8,23 @@ import (
 	"sync"
 	"time"
 
+	"crypto/sha256"
+	"encoding/hex"
+
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/sony/gobreaker"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/propagation"
 	"go.uber.org/zap"
 	"golang.org/x/time/rate"
+	"orbis/internal/discovery"
 	"orbis/internal/observability"
 )
+
+type contextKey string
+
+const ConsumerIDKey contextKey = "consumer_id"
 
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -76,6 +85,30 @@ func JWTAuth(secret string) func(http.Handler) http.Handler {
 	}
 }
 
+func APIKeyAuth(resolver *discovery.Resolver) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			apiKey := r.Header.Get("X-API-Key")
+			if apiKey == "" {
+				http.Error(w, "missing API key", http.StatusUnauthorized)
+				return
+			}
+
+			hash := sha256.Sum256([]byte(apiKey))
+			hashStr := hex.EncodeToString(hash[:])
+
+			consumer, ok := resolver.GetConsumerByKeyHash(hashStr)
+			if !ok {
+				http.Error(w, "invalid API key", http.StatusUnauthorized)
+				return
+			}
+
+			ctx := context.WithValue(r.Context(), ConsumerIDKey, consumer.ID)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
 func MetricsAndTracing(serviceName string) func(http.Handler) http.Handler {
 	tracer := otel.Tracer(serviceName)
 	return func(next http.Handler) http.Handler {
@@ -85,6 +118,14 @@ func MetricsAndTracing(serviceName string) func(http.Handler) http.Handler {
 			spanCtx, span := tracer.Start(ctx, r.URL.Path)
 			defer span.End()
 
+			consumerID := "anonymous"
+			if val := r.Context().Value(ConsumerIDKey); val != nil {
+				if id, ok := val.(string); ok {
+					consumerID = id
+					span.SetAttributes(attribute.String("consumer_id", id))
+				}
+			}
+
 			start := time.Now()
 			
 			rw := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
@@ -93,8 +134,8 @@ func MetricsAndTracing(serviceName string) func(http.Handler) http.Handler {
 			
 			duration := time.Since(start).Seconds()
 			
-			observability.GatewayRequestsTotal.WithLabelValues(r.Method, r.URL.Path, fmt.Sprintf("%d", rw.statusCode)).Inc()
-			observability.GatewayRequestLatency.WithLabelValues(r.Method, r.URL.Path).Observe(duration)
+			observability.GatewayRequestsTotal.WithLabelValues(r.Method, r.URL.Path, fmt.Sprintf("%d", rw.statusCode), consumerID).Inc()
+			observability.GatewayRequestLatency.WithLabelValues(r.Method, r.URL.Path, consumerID).Observe(duration)
 		})
 	}
 }

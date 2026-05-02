@@ -9,7 +9,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const redisHashKey = "orbis:services"
+const (
+	redisHashKey         = "orbis:services"
+	redisConsumersHashKey = "orbis:consumers"
+)
 
 type RedisStore struct {
 	client *redis.Client
@@ -70,6 +73,45 @@ func (s *RedisStore) LoadAll() ([]*models.Service, error) {
 	}
 
 	return services, nil
+}
+
+func (s *RedisStore) SaveConsumer(consumer *models.Consumer) error {
+	data, err := json.Marshal(consumer)
+	if err != nil {
+		return fmt.Errorf("failed to marshal consumer: %w", err)
+	}
+
+	err = s.client.HSet(s.ctx, redisConsumersHashKey, consumer.ID, data).Err()
+	if err != nil {
+		return fmt.Errorf("failed to save consumer to redis: %w", err)
+	}
+	return nil
+}
+
+func (s *RedisStore) DeleteConsumer(id string) error {
+	err := s.client.HDel(s.ctx, redisConsumersHashKey, id).Err()
+	if err != nil {
+		return fmt.Errorf("failed to delete consumer from redis: %w", err)
+	}
+	return nil
+}
+
+func (s *RedisStore) LoadAllConsumers() ([]*models.Consumer, error) {
+	res, err := s.client.HGetAll(s.ctx, redisConsumersHashKey).Result()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load consumers from redis: %w", err)
+	}
+
+	var consumers []*models.Consumer
+	for _, v := range res {
+		var consumer models.Consumer
+		if err := json.Unmarshal([]byte(v), &consumer); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal consumer from redis: %w", err)
+		}
+		consumers = append(consumers, &consumer)
+	}
+
+	return consumers, nil
 }
 
 func (s *RedisStore) Close() error {
